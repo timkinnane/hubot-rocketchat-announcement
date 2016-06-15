@@ -3,12 +3,6 @@ path = require 'path'
 
 module.exports = (robot, scripts) ->
 
-  #TODO: make error logging an external script
-  robot.error (err, res) ->
-    robot.logger.error "#{err}\n#{err.stack}"
-    if res?
-      res.reply "#{err}\n#{err.stack}"
-
   scriptsPath = path.resolve(__dirname, 'src')
   fs.exists scriptsPath, (exists) ->
     if exists
