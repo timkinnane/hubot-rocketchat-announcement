@@ -15,6 +15,7 @@
 #           <message> (excerpt) was sent to 245 users last Tuesday at 4:12pm
 #           122 received it successfully. 41 have been online, but didn't open announcements.
 #           82 users have not been online since it was sent.
+#
 # Notes:
 #   As well as commands above, announcements method can be directly called by custom responds
 #   e.g. TODO: method usage example
@@ -26,8 +27,8 @@
 #   Tim Kinnane @ 4thParty
 
 module.exports = (robot) ->
-  robot.respond /hello/, (msg) ->
-    msg.reply "hello!"
+  robot.respond /sparkles/, (msg) ->
+    msg.reply "(ﾉ^ヮ^)ﾉ*:・ﾟ✧"
 
-  robot.hear /orly/, ->
-    msg.send "yarly"
+  robot.hear /marco/, ->
+    msg.send "polo"
