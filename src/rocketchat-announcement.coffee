@@ -27,8 +27,9 @@
 #   Tim Kinnane @ 4thParty
 
 module.exports = (robot) ->
-  robot.respond /sparkles/, (msg) ->
+
+  robot.respond /sparkles/i, (msg) ->
     msg.reply "(ﾉ^ヮ^)ﾉ*:・ﾟ✧"
 
-  robot.hear /marco/, ->
+  robot.hear /marco/i, (msg) ->
     msg.send "polo"
