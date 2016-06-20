@@ -4,22 +4,23 @@
   "version": "0.0.0",
   "author": "Tim Kinnane <tim@nestedcode.com>",
   "license": "MIT",
-
-  "keywords": ["hubot","hubot-scripts","rocketchat","Rocket.Chat"],
-
+  "keywords": [
+    "hubot",
+    "hubot-scripts",
+    "rocketchat",
+    "Rocket.Chat"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/timkinnane/hubot-rocketchat-announcement.git"
   },
-
   "bugs": {
     "url": "https://github.com/timkinnane/hubot-rocketchat-announcement/issues"
   },
-
   "dependencies": {
-    "coffee-script": "^1.9.0"
+    "coffee-script": "^1.9.0",
+    "hubot-conversation": "^1.1.1"
   },
-
   "devDependencies": {
     "boolify-string": "^0.1.0",
     "coveralls": "^2.10.1",
@@ -39,9 +40,7 @@
     "power-assert": "^0.10.1",
     "sinon": "^1.10.2"
   },
-
   "main": "index.coffee",
-
   "scripts": {
     "test": "gulp test",
     "coveralls": "gulp test && cat coverage/lcov.info | ./node_modules/coveralls/bin/coveralls.js"
