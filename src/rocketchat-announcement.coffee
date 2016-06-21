@@ -20,7 +20,7 @@
 # Todos:
 #   TODO: Accept second parameter <who> to target group
 #   TODO: Add scheduling commands
-#   TODO: Add announcement levels (critical, informative, incidental) so robot brain can remember user preferences
+#   TODO: Add announcement levels (critical "ALERT", informative "NOTICE", incidental "UPDATE") so robot brain can remember user preferences
 #         e.g. hubot don't send me anything below <level>
 #   TODO: Add report command to reply with announcement analytics
 #         e.g. hubot announcement report 19
@@ -30,6 +30,8 @@
 
 # Use hubot conversation to branch inputs
 Conversation = require 'hubot-conversation'
+Q = require 'q'
+_ = require 'underscore'
 
 module.exports = (robot) ->
   robotName = robot.alias or robot.name
@@ -40,101 +42,24 @@ module.exports = (robot) ->
     if robot.brain.get('announcements') is null
       robot.brain.set 'announcements', []
 
-  # Get announcement text from trigger message
-  # Uses text inside quotes TODO: Use whole copy of msg.envelope
-  getAnnouncementText = (msg) ->
-    captureQuote = msg.match[1].trim().match(/(")(?:(?=(\\?))\2.)*?\1/)[0] # match quoted segment
-    captureQuote = if captureQuote.length > 0 then captureQuote.substring(1, captureQuote.length - 1) else null # trim quotes
-    unless captureQuote is null
-      return captureQuote
-    else
-      robot.logger.error "Announce command received with no quoted text to use as message."
-      msg.send "Sorry, you need to give the announcement text as a quote. e.g. announce \"Hello World!\""
-      return false
+  # ALERT, NOTICE, UPDATE send to all immediately with that level
+  robot.respond /(ALERT|NOTICE|UPDATE)/, (msg) ->
+    announcement = new Announcement msg
+    announcement.sendTo 'all' # TODO: replace with query match "announce "<message>" to <target>"
 
-  # Get the users for the specified target group
-  getTargetUsers = (target) ->
-    switch target
-      when 'all'
-        botRequest = robot.adapter.callMethod('botRequest', 'allIDs')
-    return botRequest
-
-  # Create, send and save announcement
-  sendAnnouncement = (text, users, msg) ->
-    unless text is "" or users.length < 1 or msg is null
-      robot.logger.info "Sending \"#{ announcement.text }\" to #{ users.length } users."
-
-      # Save announcement in brain and persist
-      announcement = {
-        text: text,
-        users: users,
-        source: msg.envelope.user,
-        messagess: []
-      }
-      robot.brain.set 'announcements', announcement
-      robot.brain.save()
-      console.log robot.brain.data
-
-      console.log "-------------------+\n #{ msg.envelope } \n+-------------------"
-
-      # Send to each user and store sent message IDs
-      for user in users
-        directMessage = redirectEnvelope msg, user
-        directMessage.then (dmsg)
-          announcement.messages.push dmsg
-
-          console.log "-------------------+\n #{ announcement.messages } \n+-------------------"
-
-    else
-      robot.logger.error "Announce method received insufficient parameters."
-
-  # Redirect a message as DM to another user
-  redirectEnvelope = (msg, user) ->
-    envelope = msg.envelope
-    directRoom = getDirectMessageRoomId user.name
-    directRoom.then (rid) ->
-      envelope.rid = rid
-      directMessage = robot.sendDirect envelope
-
-  # Start with command and message
-  robot.respond /announce (.*)/i, (msg) ->
-    announcementText = getAnnouncementText msg
+  # NEW starts dialog to gather parameters
+  robot.respond /NEW/, (msg) ->
     dialog = switchBoard.startDialog msg
     target = 'all' # TODO: replace with query match "announce "<message>" to <target>"
+    msg.reply "OK, I will create an announcement from your next message. What would you like to say?"
 
-    # Get target group users before responding
-    getTargetUsers(target).then (users) ->
-
-      if (users.length > 0)
-
-        # If there's users to announce to
-        # get confirmation then send
-        msg.reply "Send \"#{ announcementText }\" to #{ users.length } users?\n\nSay `#{ robotName } send` to confirm (within 30 seconds) or `#{ robotName } cancel` to stop."
-
-        # On confirmation or cancel
-        dialog.addChoice /send/i, (msg) ->
-          console.log "------SENDING------"
-          sendAnnouncement announcementText, users, msg
-
-        dialog.addChoice /cancel/i, (msg) ->
-          console.log "------CANCEL------"
-          msg.reply "OK, announcement cancelled."
-          dialog.dialogTimeout = null
-
-      else
-
-        # No results
-        robot.logger.error "Bot helper request returned 0 users"
-        msg.reply "There's been an error. I can't get target users for the announcement."
-        dialog.dialogTimeout = null
-
-      return
-
-    .catch (e) ->
-      robot.logger.error "Bot helper request returned error: #{ error }"
-      msg.reply "There's been an error. I can't get query the app to find users."
+    dialog.addChoice /cancel/i, (msg) ->
+      msg.reply "OK, announcement cancelled."
       dialog.dialogTimeout = null
-      return
+      robot.logger.info "Announcement cancelled."
+
+    dialog.receive (msg) ->
+      robot.logger.info "Announcement received."
 
     # Debug promise if nothing comes back
     dialog.dialogTimeout = (msg) ->
@@ -142,4 +67,94 @@ module.exports = (robot) ->
       msg.reply "Confirmation window expired. Start again with `announce` command."
       return
 
-  return @ # end robot exports
+    return @ # end robot exports
+
+# Announcement object instantiated from a given message
+class Announcement
+
+  # Set attributes and remove command trigger from message text
+  constructor: (@msg) ->
+    @adapter = @msg.robot.adapter
+    @original = @msg.envelope
+    @DMs = []
+    @level = @msg.match[1]
+    @text = @original.message.text = @original.message.text.substring @msg.match[0].length
+    @text = @text.trim()
+    if @text is ""
+      @msg.robot.logger.error "No text in announcement after trim."
+      @msg.reply "Sorry, there's no text content in that message. Please try again."
+    else
+      @msg.robot.logger.debug "Creating #{ @level } announcement with message \"#{ @text }\""
+
+  # Get the users for the specified target group (defaults to all)
+  setTarget: (@target) ->
+    switch @target
+      when 'online' then botRequest = @adapter.callMethod('botRequest', 'onlineIDs')
+      else botRequest = @adapter.callMethod('botRequest', 'allIDs')
+
+    botRequest.then (result) =>
+      @users = result
+      @msg.robot.logger.info "Announcement targeted at #{ @users.length } users."
+      if @users.length < 1
+        throw 'No users'
+    .catch (error) =>
+      @msg.robot.logger.error "User request returned error: #{ error }"
+      msg.reply "There's been an error. I can't get target users for the announcement."
+    return botRequest
+
+  # Get addresses for each user's DM room
+  prepareRooms: () ->
+    @msg.robot.logger.debug "Announcement addrressed to #{ @users.length } users."
+    addressingEach = _.map @users, (user) => @addressDM user
+    addressingAll = Q.all addressingEach
+    addressingAll.then (room_ids) =>
+      console.log "FINISHED addressingAll: #{ JSON.stringify room_ids }"
+    .catch (error) =>
+      @msg.robot.logger.error "Error addressing direct messages: #{ JSON.stringify error }"
+    return addressingAll
+
+  # Re-address original envolope as DM to given user
+  addressDM: (user) ->
+    @msg.robot.logger.debug "Fetching DM Room ID for #{ user.name }"
+    roomRequest = @adapter.chatdriver.getDirectMessageRoomId user.name
+    roomRequest.then (result) =>
+      @DMs.push {
+        "room": result.rid,
+        "user": user
+      }
+      @msg.robot.logger.debug "Redirecting announcement DM to #{ user.name }@#{ result.rid }"
+    .catch (error) =>
+      @msg.robot.logger.error "Error getting DM Room ID for #{ user.name }: #{ JSON.stringify error }"
+    return roomRequest
+
+  # Send DM for all target users
+  sendDMs: () ->
+    @msg.robot.logger.debug "Sending #{ @DMs.length } direct messages..."
+    sendingEach = _.map @DMs, (DM) =>
+      @msg.robot.logger.debug "to #{ DM.user.name } @ #{ DM.room }"
+      sendingDM = @adapter.chatdriver.sendMessageByRoomId @text DM.room
+      console.log sendingDM
+      return sendingDM
+    sendingAll = Q.all sendingEach
+    sendingAll.then (message_ids) =>
+      console.log "FINISHED sendingAll: #{ JSON.stringify message_ids }"
+    .catch (error) =>
+      @msg.robot.logger.error "Error sending direct messages: #{ JSON.stringify error }"
+    return sendingAll
+
+  # Save announcement in robot brain and persist
+  save: () ->
+    # @msg.robot.brain.set 'announcements', @Announcement
+    # @msg.robot.brain.save()
+
+  # Send announcement as DM to all in target group
+  sendTo: (target) ->
+    # TODO: take target from msg parameters
+    console.log 'step 1'
+    return @setTarget(target)
+    .then () =>
+      console.log 'step 2'
+      @prepareRooms()
+    .then () =>
+      console.log 'step 3'
+      @sendDMs()
