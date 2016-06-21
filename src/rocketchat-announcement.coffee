@@ -75,16 +75,17 @@ class Announcement
   # Set attributes and remove command trigger from message text
   constructor: (@msg) ->
     @adapter = @msg.robot.adapter
+    @logger = @msg.robot.logger
     @original = @msg.envelope
     @DMs = []
     @level = @msg.match[1]
     @text = @original.message.text = @original.message.text.substring @msg.match[0].length
     @text = @text.trim()
     if @text is ""
-      @msg.robot.logger.error "No text in announcement after trim."
+      @logger.error "No text in announcement after trim."
       @msg.reply "Sorry, there's no text content in that message. Please try again."
     else
-      @msg.robot.logger.debug "Creating #{ @level } announcement with message \"#{ @text }\""
+      @logger.debug "Creating #{ @level } announcement with message \"#{ @text }\""
 
   # Get the users for the specified target group (defaults to all)
   setTarget: (@target) ->
@@ -94,53 +95,52 @@ class Announcement
 
     botRequest.then (result) =>
       @users = result
-      @msg.robot.logger.info "Announcement targeted at #{ @users.length } users."
+      @logger.info "Announcement targeted at #{ @users.length } users."
       if @users.length < 1
         throw 'No users'
     .catch (error) =>
-      @msg.robot.logger.error "User request returned error: #{ error }"
+      @logger.error "User request returned error: #{ error }"
       msg.reply "There's been an error. I can't get target users for the announcement."
     return botRequest
 
   # Get addresses for each user's DM room
   prepareRooms: () ->
-    @msg.robot.logger.debug "Announcement addrressed to #{ @users.length } users."
-    addressingEach = _.map @users, (user) => @addressDM user
-    addressingAll = Q.all addressingEach
-    addressingAll.then (room_ids) =>
-      console.log "FINISHED addressingAll: #{ JSON.stringify room_ids }"
+    @logger.debug "Announcement addrressed to #{ @users.length } users."
+    return Q.all _.map @users, (user) => @addressDM user
     .catch (error) =>
-      @msg.robot.logger.error "Error addressing direct messages: #{ JSON.stringify error }"
-    return addressingAll
+      @logger.error "Error addressing direct messages: #{ JSON.stringify error }"
 
   # Re-address original envolope as DM to given user
   addressDM: (user) ->
-    @msg.robot.logger.debug "Fetching DM Room ID for #{ user.name }"
+    @logger.debug "Fetching DM Room ID for #{ user.name }"
     roomRequest = @adapter.chatdriver.getDirectMessageRoomId user.name
     roomRequest.then (result) =>
       @DMs.push {
         "room": result.rid,
         "user": user
       }
-      @msg.robot.logger.debug "Redirecting announcement DM to #{ user.name }@#{ result.rid }"
+      @logger.debug "Addressing announcement DM to #{ result.rid } (#{ user.name })"
     .catch (error) =>
-      @msg.robot.logger.error "Error getting DM Room ID for #{ user.name }: #{ JSON.stringify error }"
+      @logger.error "Error getting DM Room ID for #{ user.name }: #{ JSON.stringify error }"
     return roomRequest
 
   # Send DM for all target users
   sendDMs: () ->
-    @msg.robot.logger.debug "Sending #{ @DMs.length } direct messages..."
-    sendingEach = _.map @DMs, (DM) =>
-      @msg.robot.logger.debug "to #{ DM.user.name } @ #{ DM.room }"
-      sendingDM = @adapter.chatdriver.sendMessageByRoomId @text DM.room
-      console.log sendingDM
-      return sendingDM
-    sendingAll = Q.all sendingEach
-    sendingAll.then (message_ids) =>
-      console.log "FINISHED sendingAll: #{ JSON.stringify message_ids }"
+    @logger.debug "Sending #{ @DMs.length } direct messages..."
+    return Q.all _.map @DMs, (DM) => @sendToRoom DM.room
     .catch (error) =>
-      @msg.robot.logger.error "Error sending direct messages: #{ JSON.stringify error }"
-    return sendingAll
+      @logger.error "Error sending direct messages: #{ JSON.stringify error }"
+
+  # Send announcement text to room
+  sendToRoom: (room) ->
+    @logger.debug "...to #{ room }"
+    sendingDM = Q.fcall () =>
+      @adapter.chatdriver.sendMessageByRoomId @text, room
+    sendingDM.then (result) =>
+      @logger.debug "Sent DM: #{ result }"
+    .catch (error) =>
+      @logger.error "Error sending DM: #{ error }"
+    return sendingDM
 
   # Save announcement in robot brain and persist
   save: () ->
@@ -150,11 +150,8 @@ class Announcement
   # Send announcement as DM to all in target group
   sendTo: (target) ->
     # TODO: take target from msg parameters
-    console.log 'step 1'
     return @setTarget(target)
     .then () =>
-      console.log 'step 2'
       @prepareRooms()
     .then () =>
-      console.log 'step 3'
       @sendDMs()
