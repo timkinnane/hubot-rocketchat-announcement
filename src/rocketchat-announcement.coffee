@@ -42,10 +42,109 @@ module.exports = (robot) ->
     if robot.brain.get('announcements') is null
       robot.brain.set 'announcements', []
 
+  # Get user from Rocket.chat (outside class so it can be called directly)
+  getUsers = () ->
+    config = {
+      userFields: { _id: 1, name: 1, username: 1, status: 1, emails: 1 },
+      onlineQuery: { "status": { $ne: "offline" } },
+      userQuery: { "roles": { $not: { $all: ["bot"] } } }
+    }
+    return Q.fcall () ->
+      result = robot.adapter.callMethod 'users.find', config.userQuery, { fields: config.userFields }
+      return result
+    # this._onlineUsers = Meteor.users.find( { $and: [config.userQuery, config.onlineQuery] }, { fields: config.userFields } );
+    # this._allUsers = Meteor.users.find( config.userQuery, { fields: config.userFields } );
+
+  # Announcement object instantiated from a given message
+  class Announcement
+
+    constructor: (@msg) ->
+      @original = @msg.envelope
+      @level = @msg.match[0] # command text
+      @DMs = []
+
+      # Remove command from message text, validate then append source
+      @text = @original.message.text = @original.message.text.substring @msg.match[0].length
+      @text = "#{ @text.trim() }"
+      if @text is ""
+        robot.logger.error "No text in announcement after trim."
+        @msg.reply "Sorry, there's no text content in that message. Please try again."
+        return false
+      else
+        robot.logger.debug "Creating #{ @level } announcement with message '#{ @text }'"
+      @text += "\nSent by @#{ @original.user.name }"
+
+      return @ # Return thyself
+
+    # Get the users for the specified target group (defaults to all)
+    setTarget: (@target) ->
+      switch @target
+        when 'online' then botRequest = robot.adapter.callMethod('botRequest', 'onlineIDs')
+        else botRequest = robot.adapter.callMethod('botRequest', 'allIDs')
+
+      return botRequest
+      .then (result) =>
+        @users = result
+        robot.logger.info "Announcement targeted at #{ @users.length } users."
+        if @users.length < 1
+          throw 'No users'
+      .catch (error) =>
+        robot.logger.error "User request returned error: #{ error }"
+        msg.reply "There's been an error. I can't get target users for the announcement."
+
+    # Get addresses for each user's DM room
+    addressDMs: () ->
+      robot.logger.debug "Announcement addrressed to #{ @users.length } users."
+      return Q.all _.map @users, (user) =>
+        robot.adapter.chatdriver.getDirectMessageRoomId user.name
+        .then (result) =>
+          robot.logger.debug "Addressing announcement DM to #{ result.rid } (#{ user.name })"
+          @DMs.push { "room": result.rid, "user": user }
+        .catch (error) =>
+          robot.logger.error "Error getting DM Room ID for #{ user.name }: #{ JSON.stringify error }"
+
+    # Send DM to all target users
+    # NB: Q.fcall used because sendMessageByRoomId does not return a promise
+    sendDMs: () ->
+      robot.logger.debug "Sending #{ @DMs.length } direct messages..."
+      return Q.all _.map @DMs, (DM) =>
+        Q.fcall () => robot.adapter.chatdriver.sendMessageByRoomId @text, DM.room
+      .catch (error) =>
+        robot.logger.error "Error sending direct messages: #{ JSON.stringify error }"
+
+    # Save announcement in robot brain and persist
+    save: () ->
+      # @msg.robot.brain.set 'announcements', @Announcement
+      # @msg.robot.brain.save()
+
+    # Send announcement as DM to all in target group
+    sendTo: (target) ->
+      # TODO: take target from msg parameters
+      return @setTarget(target)
+      .then () =>
+        @addressDMs()
+      .then () =>
+        @sendDMs()
+
+  #--------------------------------------------------------
+  # LISTENERS ---------------------------------------------
+  #--------------------------------------------------------
+
   # ALERT, NOTICE, UPDATE send to all immediately with that level
   robot.respond /(ALERT|NOTICE|UPDATE)/, (msg) ->
-    announcement = new Announcement msg
-    announcement.sendTo 'all' # TODO: replace with query match "announce "<message>" to <target>"
+    if announcement = new Announcement(msg) or false
+      announcement.sendTo 'all' # TODO: replace with query match "announce "<message>" to <target>"
+    else
+      msg.reply "An error stopped me from creating that announcement."
+
+  # Check WHO alert will go to for given target
+  robot.respond /WHO/, (msg) ->
+    getUsers().then (result) ->
+      console.log result
+      msg.reply JSON.stringify result.fetch()
+    .catch (error) ->
+      console.error error
+      msg.reply "Couldn't get users"
 
   # NEW starts dialog to gather parameters
   robot.respond /NEW/, (msg) ->
@@ -67,91 +166,4 @@ module.exports = (robot) ->
       msg.reply "Confirmation window expired. Start again with `announce` command."
       return
 
-    return @ # end robot exports
-
-# Announcement object instantiated from a given message
-class Announcement
-
-  # Set attributes and remove command trigger from message text
-  constructor: (@msg) ->
-    @adapter = @msg.robot.adapter
-    @logger = @msg.robot.logger
-    @original = @msg.envelope
-    @DMs = []
-    @level = @msg.match[1]
-    @text = @original.message.text = @original.message.text.substring @msg.match[0].length
-    @text = @text.trim()
-    if @text is ""
-      @logger.error "No text in announcement after trim."
-      @msg.reply "Sorry, there's no text content in that message. Please try again."
-    else
-      @logger.debug "Creating #{ @level } announcement with message \"#{ @text }\""
-
-  # Get the users for the specified target group (defaults to all)
-  setTarget: (@target) ->
-    switch @target
-      when 'online' then botRequest = @adapter.callMethod('botRequest', 'onlineIDs')
-      else botRequest = @adapter.callMethod('botRequest', 'allIDs')
-
-    botRequest.then (result) =>
-      @users = result
-      @logger.info "Announcement targeted at #{ @users.length } users."
-      if @users.length < 1
-        throw 'No users'
-    .catch (error) =>
-      @logger.error "User request returned error: #{ error }"
-      msg.reply "There's been an error. I can't get target users for the announcement."
-    return botRequest
-
-  # Get addresses for each user's DM room
-  prepareRooms: () ->
-    @logger.debug "Announcement addrressed to #{ @users.length } users."
-    return Q.all _.map @users, (user) => @addressDM user
-    .catch (error) =>
-      @logger.error "Error addressing direct messages: #{ JSON.stringify error }"
-
-  # Re-address original envolope as DM to given user
-  addressDM: (user) ->
-    @logger.debug "Fetching DM Room ID for #{ user.name }"
-    roomRequest = @adapter.chatdriver.getDirectMessageRoomId user.name
-    roomRequest.then (result) =>
-      @DMs.push {
-        "room": result.rid,
-        "user": user
-      }
-      @logger.debug "Addressing announcement DM to #{ result.rid } (#{ user.name })"
-    .catch (error) =>
-      @logger.error "Error getting DM Room ID for #{ user.name }: #{ JSON.stringify error }"
-    return roomRequest
-
-  # Send DM for all target users
-  sendDMs: () ->
-    @logger.debug "Sending #{ @DMs.length } direct messages..."
-    return Q.all _.map @DMs, (DM) => @sendToRoom DM.room
-    .catch (error) =>
-      @logger.error "Error sending direct messages: #{ JSON.stringify error }"
-
-  # Send announcement text to room
-  sendToRoom: (room) ->
-    @logger.debug "...to #{ room }"
-    sendingDM = Q.fcall () =>
-      @adapter.chatdriver.sendMessageByRoomId @text, room
-    sendingDM.then (result) =>
-      @logger.debug "Sent DM: #{ result }"
-    .catch (error) =>
-      @logger.error "Error sending DM: #{ error }"
-    return sendingDM
-
-  # Save announcement in robot brain and persist
-  save: () ->
-    # @msg.robot.brain.set 'announcements', @Announcement
-    # @msg.robot.brain.save()
-
-  # Send announcement as DM to all in target group
-  sendTo: (target) ->
-    # TODO: take target from msg parameters
-    return @setTarget(target)
-    .then () =>
-      @prepareRooms()
-    .then () =>
-      @sendDMs()
+  return @ # end robot exports
