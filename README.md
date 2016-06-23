@@ -48,7 +48,7 @@ Sends to all users (including user1)...
 
 ```
 hubot>> Don't eat the blue cupcakes!
-        [ALERT] sent by [@user1]
+        ALERT sent by @user1
 ```
 
 ### Dialog send
@@ -68,7 +68,7 @@ Sends to all users...
 
 ```
 hubot>> Don't eat the blue cupcakes!
-        [NOTICE] sent by [@user1]
+        NOTICE sent by @user1
 ```
 
 With level:
@@ -84,7 +84,7 @@ Sends to all users...
 
 ```
 hubot>> You may eat the pink cupcakes.
-        [UPDATE] sent by [@user1]
+        UPDATE sent by @user1
 ```
 
 
