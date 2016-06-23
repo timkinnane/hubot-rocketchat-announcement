@@ -53,7 +53,7 @@ hubot>> Don't eat the blue cupcakes!
 
 ### Dialog send
 
-Use NEW (optionally with level) to start dialog to produce announcements.
+Use NEW (optionally with level) to [start dialog](https://github.com/lmarkus/hubot-conversation) to produce announcements.
 
 This method intended to handle more complicated announcements in roadmap, e.g. scheduling and user group targets.
 
