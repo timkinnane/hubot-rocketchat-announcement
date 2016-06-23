@@ -48,7 +48,7 @@ module.exports = (robot) ->
     if match.indexOf(robot.name) is nameStart then named = robot.name
     else if match.indexOf(robot.alias) is nameStart then named = robot.alias
     nameLength = nameStart + named.length
-    if match.indexOf(nameLength) is ':' then nameLength++
+    if match.charAt(nameLength) is ':' then nameLength++
     return match.substring(nameLength).trim()
 
   # Announcement object instantiated from a given message
@@ -66,9 +66,9 @@ module.exports = (robot) ->
         robot.logger.error "No text in announcement after trim."
         @msg.reply "Sorry, there's no text content in that message. Please try again."
         return false
-      else
-        robot.logger.debug "Creating #{ @level } announcement with message '#{ @text }'"
-      @text += "`#{ @level }`\n sent by @#{ @original.user.name }"
+
+      robot.logger.debug "Creating #{ @level } announcement with message '#{ @text }'"
+      @text += "\n_#{ @level } sent by_ @#{ @original.user.name }"
 
       return @ # Return thyself
 
