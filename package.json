@@ -1,7 +1,7 @@
 {
   "name": "hubot-rocketchat-announcement",
   "description": "A hubot script to make DM announcements to Rocket.Chat users.",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "author": "Tim Kinnane <tim@nestedcode.com>",
   "license": "MIT",
   "keywords": [
