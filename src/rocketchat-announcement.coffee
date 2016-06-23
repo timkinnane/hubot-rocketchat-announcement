@@ -47,7 +47,9 @@ module.exports = (robot) ->
     nameStart = if match.charAt(0) is '@' then 1 else 0
     if match.indexOf(robot.name) is nameStart then named = robot.name
     else if match.indexOf(robot.alias) is nameStart then named = robot.alias
-    nameLength = nameStart + named.length
+    else if match.indexOf('Hubot') is nameStart then named = 'Hubot' # dialog prepends hubot (this is dumb)
+    else if match.indexOf('hubot') is nameStart then named = 'hubot'
+    nameLength = if named is undefined then 0 else nameStart + named.length
     if match.charAt(nameLength) is ':' then nameLength++
     return match.substring(nameLength).trim()
 
