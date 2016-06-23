@@ -20,8 +20,8 @@
 # Todos:
 #   TODO: Accept second parameter <who> to target group
 #   TODO: Add scheduling commands
-#   TODO: Add announcement levels (critical "ALERT", informative "NOTICE", incidental "UPDATE") so robot brain can remember user preferences
 #         e.g. hubot don't send me anything below <level>
+#   TODO: Save announcements in brain DB with ID so sent message status can be retrieved
 #   TODO: Add report command to reply with announcement analytics
 #         e.g. hubot announcement report 19
 #           <message> (excerpt) was sent to 245 users last Tuesday at 4:12pm
@@ -42,29 +42,25 @@ module.exports = (robot) ->
     if robot.brain.get('announcements') is null
       robot.brain.set 'announcements', []
 
-  # Get user from Rocket.chat (outside class so it can be called directly)
-  getUsers = () ->
-    config = {
-      userFields: { _id: 1, name: 1, username: 1, status: 1, emails: 1 },
-      onlineQuery: { "status": { $ne: "offline" } },
-      userQuery: { "roles": { $not: { $all: ["bot"] } } }
-    }
-    return Q.fcall () ->
-      result = robot.adapter.callMethod 'users.find', config.userQuery, { fields: config.userFields }
-      return result
-    # this._onlineUsers = Meteor.users.find( { $and: [config.userQuery, config.onlineQuery] }, { fields: config.userFields } );
-    # this._allUsers = Meteor.users.find( config.userQuery, { fields: config.userFields } );
+  # Remove the robot name to isolate the matched words
+  stripRobotName = (match) ->
+    nameStart = if match.charAt(0) is '@' then 1 else 0
+    if match.indexOf(robot.name) is nameStart then named = robot.name
+    else if match.indexOf(robot.alias) is nameStart then named = robot.alias
+    nameLength = nameStart + named.length
+    if match.indexOf(nameLength) is ':' then nameLength++
+    return match.substring(nameLength).trim()
 
   # Announcement object instantiated from a given message
   class Announcement
 
-    constructor: (@msg) ->
+    constructor: (@msg, lvl=null, txt=null) ->
       @original = @msg.envelope
-      @level = @msg.match[0] # command text
+      @level = lvl or stripRobotName @msg.match[0] # get matched word in command
       @DMs = []
 
       # Remove command from message text, validate then append source
-      @text = @original.message.text = @original.message.text.substring @msg.match[0].length
+      @text = txt or @original.message.text.substring @msg.match[0].length # get message sans matched word
       @text = "#{ @text.trim() }"
       if @text is ""
         robot.logger.error "No text in announcement after trim."
@@ -72,7 +68,7 @@ module.exports = (robot) ->
         return false
       else
         robot.logger.debug "Creating #{ @level } announcement with message '#{ @text }'"
-      @text += "\nSent by @#{ @original.user.name }"
+      @text += "`#{ @level }`\n sent by @#{ @original.user.name }"
 
       return @ # Return thyself
 
@@ -131,39 +127,46 @@ module.exports = (robot) ->
   #--------------------------------------------------------
 
   # ALERT, NOTICE, UPDATE send to all immediately with that level
-  robot.respond /(ALERT|NOTICE|UPDATE)/, (msg) ->
+  # TODO: USE environment variable for announcement levels (csv array to regex)
+  robot.respond /(ALERT|NOTICE|UPDATE|SOCIAL)/, (msg) ->
     if announcement = new Announcement(msg) or false
-      announcement.sendTo 'all' # TODO: replace with query match "announce "<message>" to <target>"
+      announcement.sendTo 'all' # TODO: replace with query match "<type> to <target> <message>"
     else
       msg.reply "An error stopped me from creating that announcement."
 
-  # Check WHO alert will go to for given target
-  robot.respond /WHO/, (msg) ->
-    getUsers().then (result) ->
-      console.log result
-      msg.reply JSON.stringify result.fetch()
-    .catch (error) ->
-      console.error error
-      msg.reply "Couldn't get users"
-
   # NEW starts dialog to gather parameters
-  robot.respond /NEW/, (msg) ->
+  robot.respond /(NEW)(.*)/, (msg) ->
+
+    # Determine alert type if passed in command (defautls to NOTICE)
+    match2 = msg.match[2].trim()
+    if match2 and match2.length and ['ALERT','NOTICE','UPDATE','SOCIAL'].indexOf(msg.match[2].trim()) isnt -1
+      type = match2
+    else
+      type = "NOTICE"
+
+    # Start dialog expecting response as the announcement message
     dialog = switchBoard.startDialog msg
-    target = 'all' # TODO: replace with query match "announce "<message>" to <target>"
-    msg.reply "OK, I will create an announcement from your next message. What would you like to say?"
+    msg.reply "OK, I'll create a #{ type } from your next message.\nReply with the message you'd like to send (or `cancel` within 30 seconds)."
 
-    dialog.addChoice /cancel/i, (msg) ->
-      msg.reply "OK, announcement cancelled."
+    # Cancel announcement and dialog if told to
+    dialog.addChoice /cancel/i, (msg2) ->
+      msg2.reply "OK, announcement cancelled."
       dialog.dialogTimeout = null
-      robot.logger.info "Announcement cancelled."
+      robot.logger.info "NEW #{ type } announcement cancelled."
 
-    dialog.receive (msg) ->
-      robot.logger.info "Announcement received."
+    # Capture any message that has at least one non-space character.
+    dialog.addChoice /^(?!\s*$).+/, (msg2) ->
+      robot.logger.info "NEW #{ type } announcement received."
+      # NB: Pass whole of message as text or announcement will try crop the matching word (which is everything)
+      text = stripRobotName msg2.message.text
+      if announcement = new Announcement(msg2, type, text) or false
+        announcement.sendTo 'all'
+      else
+        msg2.reply "An error stopped me from creating that announcement."
 
     # Debug promise if nothing comes back
     dialog.dialogTimeout = (msg) ->
       robot.logger.debug "Announcement conversation timed out"
-      msg.reply "Confirmation window expired. Start again with `announce` command."
-      return
+      msg.reply "Confirmation window expired. Start again with `NEW` command."
 
   return @ # end robot exports
