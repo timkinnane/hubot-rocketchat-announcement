@@ -94,6 +94,7 @@ module.exports = (robot) ->
     addressDMs: () ->
       robot.logger.debug "Announcement addrressed to #{ @users.length } users."
       return Q.all _.map @users, (user) =>
+        # robot.logger.debug "Requesting DM ID for #{ user.name }"
         robot.adapter.chatdriver.getDirectMessageRoomId user.name
         .then (result) =>
           robot.logger.debug "Addressing announcement DM to #{ result.rid } (#{ user.name })"
@@ -106,7 +107,10 @@ module.exports = (robot) ->
     sendDMs: () ->
       robot.logger.debug "Sending #{ @DMs.length } direct messages..."
       return Q.all _.map @DMs, (DM) =>
-        Q.fcall () => robot.adapter.chatdriver.sendMessageByRoomId @text, DM.room
+        # robot.logger.debug "Sending announcement to room #{ DM.room }"
+        try Q.fcall () => robot.adapter.chatdriver.sendMessageByRoomId @text, DM.room
+        catch e then robot.logger.error "Error sending direct message to #{ DM.room }: #{ e }"
+        finally return true # carry on to next
       .catch (error) =>
         robot.logger.error "Error sending direct messages: #{ JSON.stringify error }"
 
