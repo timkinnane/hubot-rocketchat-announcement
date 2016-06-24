@@ -95,11 +95,10 @@ module.exports = (robot) ->
       robot.logger.debug "Announcement addrressed to #{ @users.length } users."
       return Q.all _.map @users, (user) =>
         # robot.logger.debug "Requesting DM ID for #{ user.name }"
-        robot.adapter.chatdriver.getDirectMessageRoomId user.name
-        .then (result) =>
+        Q.when robot.adapter.chatdriver.getDirectMessageRoomId(user.name), (result) =>
           robot.logger.debug "Addressing announcement DM to #{ result.rid } (#{ user.name })"
           @DMs.push { "room": result.rid, "user": user }
-        .catch (error) =>
+        , (error) ->
           robot.logger.error "Error getting DM Room ID for #{ user.name }: #{ JSON.stringify error }"
 
     # Send DM to all target users
