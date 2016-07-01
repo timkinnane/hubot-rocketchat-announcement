@@ -70,7 +70,7 @@ module.exports = (robot) ->
         return false
 
       robot.logger.debug "Creating #{ @level } announcement with message '#{ @text }'"
-      @text += "\n_#{ @level } sent by_ @#{ @original.user.name }"
+      @text += "\n#{ @level } sent by @#{ @original.user.name }"
 
       return @ # Return thyself
 
