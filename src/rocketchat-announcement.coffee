@@ -56,21 +56,30 @@ module.exports = (robot) ->
   # Announcement object instantiated from a given message
   class Announcement
 
-    constructor: (@msg, lvl=null, txt=null) ->
+    constructor: (@msg, lvl, txt) ->
       @original = @msg.envelope
       @level = lvl or stripRobotName @msg.match[0] # get matched word in command
+      @metaString = "#{ @level } sent by @#{ @original.user.name }"
       @DMs = []
 
-      # Remove command from message text, validate then append source
-      @text = txt or @original.message.text.substring @msg.match[0].length # get message sans matched word
-      @text = "#{ @text.trim() }"
-      if @text is ""
-        robot.logger.error "No text in announcement after trim."
-        @msg.reply "Sorry, there's no text content in that message. Please try again."
-        return false
+      if @original.message.hasOwnProperty('attachment')
+        # Compose message object with attachment intact
+        @message = {
+          msg: "#{ @metaString }\nSee attached:",
+          attachments: [@original.message.attachment]
+        }
+        robot.logger.debug "Creating #{ @level } attachment announcement for #{ @original.user.name } with #{ @original.attachment }"
 
-      robot.logger.debug "Creating #{ @level } announcement with message '#{ @text }'"
-      @text += "\n#{ @level } sent by @#{ @original.user.name }"
+      else
+        # Remove command from text, validate then append metaString
+        @message = txt or @original.message.text.substring @msg.match[0].length # get message sans matched word
+        @message = "#{ @message.trim() }"
+        if @message is ""
+          @msg.reply "Sorry, there's no text content in that message. Please try again."
+          robot.logger.error "No text in announcement after trim."
+          return false
+        @message += "\n#{ @metaString }"
+        robot.logger.debug "Creating #{ @level } text attachment for #{ @original.user.name }:\n#{ @message }"
 
       return @ # Return thyself
 
@@ -87,8 +96,9 @@ module.exports = (robot) ->
         if @users.length < 1
           throw 'No users'
       .catch (error) =>
-        robot.logger.error "User request returned error: #{ error }"
         msg.reply "There's been an error. I can't get target users for the announcement."
+        robot.logger.error "User request returned error: #{ error }"
+        robot.logger.error error
 
     # Get addresses for each user's DM room
     addressDMs: () ->
@@ -106,8 +116,7 @@ module.exports = (robot) ->
     sendDMs: () ->
       robot.logger.debug "Sending #{ @DMs.length } direct messages..."
       return Q.all _.map @DMs, (DM) =>
-        # robot.logger.debug "Sending announcement to room #{ DM.room }"
-        try Q.fcall () => robot.adapter.chatdriver.sendMessageByRoomId @text, DM.room
+        try Q.fcall () => robot.adapter.chatdriver.sendMessageByRoomId @message, DM.room
         catch e then robot.logger.error "Error sending direct message to #{ DM.room }: #{ e }"
         finally return true # carry on to next
       .catch (error) =>
